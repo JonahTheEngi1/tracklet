@@ -11,8 +11,8 @@ RUN npm ci --include=dev
 # Copy source code
 COPY . .
 
-# Build the application
-RUN npm run build
+# Build using Docker-specific build script (excludes Replit plugins)
+RUN npx tsx script/build-docker.ts
 
 # Production stage
 FROM node:20-alpine AS production
