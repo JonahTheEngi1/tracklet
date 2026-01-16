@@ -1,0 +1,75 @@
+version: "2.4"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: parcelpath-db
+    environment:
+      POSTGRES_USER: parcelpath
+      POSTGRES_PASSWORD: parcelpathpostgresql
+      POSTGRES_DB: parcelpath
+    volumes:
+      - parcelpath_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parcelpath -d parcelpath"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Creates required extension for gen_random_uuid()
+  db_init:
+    image: postgres:16-alpine
+    container_name: parcelpath-db-init
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: parcelpathpostgresql
+    command: >
+      sh -c "
+        echo 'Enabling pgcrypto...';
+        psql -h db -U parcelpath -d parcelpath -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto;';
+        echo 'pgcrypto enabled.';
+      "
+    restart: "no"
+
+  # Runs Drizzle schema sync (creates tables like sessions/users/app tables)
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: parcelpath-migrate
+    depends_on:
+      db_init:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://parcelpath:@db:5432/parcelpath
+    command: sh -c "npm run db:push"
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: parcelpath-app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      DATABASE_URL: postgres://parcelpath:parcelpathpostgresql@db:5432/parcelpath
+
+      # IMPORTANT: set this to something strong in production
+      SESSION_SECRET: 7c9f2b8d0a6e4f3aB9E1cD5F2K7mQwXH8RjS6VZPpA4yN0LUTGkMheJ
+
+      # Optional (only if you use JSONBin backups in the app)
+      JSONBIN_API_KEY: $2a$10$FqG1RkMAARCfMGhYjN0pUOr/FcN4SgbX54KLVfTXAmQy0QwvjvhkK
+    ports:
+      - "80:5000"   # host:container (change 8080 to whatever you want)
+    restart: unless-stopped
+
+volumes:
+  parcelpath_db_data:
