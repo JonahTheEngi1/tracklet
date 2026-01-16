@@ -5,8 +5,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install ALL dependencies (including devDependencies needed for build)
+RUN npm ci --include=dev
 
 # Copy source code
 COPY . .
@@ -19,8 +19,10 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
-# Copy package files and install production dependencies only
+# Copy package files
 COPY package*.json ./
+
+# Install production dependencies only
 RUN npm ci --omit=dev
 
 # Copy built assets from builder
