@@ -21,6 +21,8 @@ export function getSession() {
     console.warn("WARNING: SESSION_SECRET not set in production. Please set a strong secret.");
   }
   
+  const isProduction = process.env.NODE_ENV === "production";
+  
   return session({
     secret: process.env.SESSION_SECRET || "tracklet-dev-secret-change-in-production",
     store: sessionStore,
@@ -28,7 +30,8 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isProduction,
+      sameSite: "lax",
       maxAge: sessionTtl,
     },
   });
