@@ -1,33 +1,37 @@
-# ---- Build stage (installs dev deps + runs vite/esbuild via tsx) ----
-FROM node:20-bookworm-slim AS build
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# (Optional but helps when optional native deps try to compile)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-  python3 make g++ \
-  && rm -rf /var/lib/apt/lists/*
+# Copy package files
+COPY package*.json ./
 
-COPY package.json package-lock.json ./
+# Install dependencies
 RUN npm ci
 
+# Copy source code
 COPY . .
 
-# Build produces: dist/public + dist/index.cjs
+# Build the application
 RUN npm run build
 
+# Production stage
+FROM node:20-alpine AS production
 
-# ---- Runtime stage (production deps only) ----
-FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
+# Copy package files and install production dependencies only
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# Copy built assets from builder
+COPY --from=builder /app/dist ./dist
+
+# Expose port
+EXPOSE 5000
+
+# Set environment variables
 ENV NODE_ENV=production
 ENV PORT=5000
 
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
-
-COPY --from=build /app/dist ./dist
-
-EXPOSE 5000
+# Start the application
 CMD ["node", "dist/index.cjs"]
