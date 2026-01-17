@@ -24,6 +24,7 @@ import {
   Building2,
   Warehouse,
   Database,
+  Ticket,
 } from "lucide-react";
 
 interface AppSidebarProps {
@@ -41,6 +42,7 @@ export function AppSidebar({ userRole, locationId, locationName }: AppSidebarPro
     { title: "Locations", url: "/admin/locations", icon: Building2 },
     { title: "Users", url: "/admin/users", icon: Users },
     { title: "Backups", url: "/admin/backups", icon: Database },
+    { title: "Tickets", url: "/admin/tickets", icon: Ticket },
     { title: "Settings", url: "/admin/settings", icon: Settings },
   ];
 
@@ -48,6 +50,7 @@ export function AppSidebar({ userRole, locationId, locationName }: AppSidebarPro
     { title: "Packages", url: "/", icon: Package },
     { title: "Storage", url: "/storage", icon: Warehouse },
     { title: "Users", url: "/users", icon: Users },
+    { title: "Support", url: "/tickets", icon: Ticket },
   ];
 
   const isActive = (url: string) => {
