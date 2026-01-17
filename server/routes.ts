@@ -120,6 +120,14 @@ export async function registerRoutes(
         return res.status(403).json({ message: "Account is deactivated" });
       }
 
+      // Check if user's location is suspended (skip for admins who have no location)
+      if (appUser.locationId && appUser.role !== "admin") {
+        const location = await storage.getLocation(appUser.locationId);
+        if (location?.isSuspended) {
+          return res.status(403).json({ message: "Location is suspended", code: "LOCATION_SUSPENDED" });
+        }
+      }
+
       res.json(appUser);
     } catch (error) {
       console.error("Error fetching app user:", error);
@@ -297,9 +305,72 @@ export async function registerRoutes(
     }
   });
 
-  // Delete location (admin)
+  // Suspend location (admin)
+  app.post("/api/admin/locations/:id/suspend", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const location = await storage.suspendLocation(req.params.id);
+      if (!location) {
+        return res.status(404).json({ message: "Location not found" });
+      }
+      res.json(location);
+    } catch (error) {
+      console.error("Error suspending location:", error);
+      res.status(500).json({ message: "Failed to suspend location" });
+    }
+  });
+
+  // Unsuspend location (admin)
+  app.post("/api/admin/locations/:id/unsuspend", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const location = await storage.unsuspendLocation(req.params.id);
+      if (!location) {
+        return res.status(404).json({ message: "Location not found" });
+      }
+      res.json(location);
+    } catch (error) {
+      console.error("Error unsuspending location:", error);
+      res.status(500).json({ message: "Failed to unsuspend location" });
+    }
+  });
+
+  // Delete location with backup (admin)
   app.delete("/api/admin/locations/:id", isAuthenticated, isAdmin, async (req, res) => {
     try {
+      const { confirmName } = req.body;
+      const location = await storage.getLocation(req.params.id);
+      
+      if (!location) {
+        return res.status(404).json({ message: "Location not found" });
+      }
+
+      // Verify confirmation name matches
+      if (confirmName !== location.name) {
+        return res.status(400).json({ message: "Location name does not match" });
+      }
+
+      // Create a final backup to JSONBin before deletion
+      const apiKey = process.env.JSONBIN_API_KEY;
+      if (apiKey) {
+        try {
+          const backupData = await storage.getLocationDataForBackup(req.params.id);
+          backupData.deletedAt = new Date().toISOString();
+          backupData.deleteReason = "Location deleted by admin";
+          
+          await fetch("https://api.jsonbin.io/v3/b", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Master-Key": apiKey,
+              "X-Bin-Name": `DELETED_${location.name}_${new Date().toISOString().split('T')[0]}`,
+            },
+            body: JSON.stringify(backupData),
+          });
+          console.log(`[Backup] Created deletion backup for ${location.name}`);
+        } catch (backupError) {
+          console.error("[Backup] Failed to create deletion backup:", backupError);
+        }
+      }
+
       await storage.deleteLocation(req.params.id);
       res.status(204).send();
     } catch (error) {
@@ -862,6 +933,221 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error running backup:", error);
       res.status(500).json({ message: "Failed to run backup" });
+    }
+  });
+
+  // ======== TICKET ROUTES ========
+
+  // Get all tickets (admin only)
+  app.get("/api/admin/tickets", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const allTickets = await storage.getTickets();
+      res.json(allTickets);
+    } catch (error) {
+      console.error("Error fetching tickets:", error);
+      res.status(500).json({ message: "Failed to fetch tickets" });
+    }
+  });
+
+  // Get single ticket (admin only)
+  app.get("/api/admin/tickets/:id", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const ticket = await storage.getTicket(req.params.id);
+      if (!ticket) {
+        return res.status(404).json({ message: "Ticket not found" });
+      }
+      res.json(ticket);
+    } catch (error) {
+      console.error("Error fetching ticket:", error);
+      res.status(500).json({ message: "Failed to fetch ticket" });
+    }
+  });
+
+  // Update ticket status (admin only)
+  app.patch("/api/admin/tickets/:id", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const { status } = req.body;
+      const ticket = await storage.getTicket(req.params.id);
+      
+      if (!ticket) {
+        return res.status(404).json({ message: "Ticket not found" });
+      }
+
+      const updates: any = { status };
+      
+      // If resolving, set resolved timestamp
+      if (status === "resolved" || status === "closed") {
+        updates.resolvedAt = new Date();
+        
+        // Archive to JSONBin when resolved
+        const apiKey = process.env.JSONBIN_API_KEY;
+        if (apiKey) {
+          try {
+            const archiveData = {
+              ...ticket,
+              resolvedAt: updates.resolvedAt,
+              archivedAt: new Date().toISOString(),
+            };
+            
+            const response = await fetch("https://api.jsonbin.io/v3/b", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Master-Key": apiKey,
+                "X-Bin-Name": `TICKET_${ticket.id}_${new Date().toISOString().split('T')[0]}`,
+              },
+              body: JSON.stringify(archiveData),
+            });
+
+            if (response.ok) {
+              const binData = await response.json();
+              updates.archivedBinId = binData.metadata.id;
+              console.log(`[Tickets] Archived ticket ${ticket.id} to JSONBin`);
+            }
+          } catch (archiveError) {
+            console.error("[Tickets] Failed to archive ticket:", archiveError);
+          }
+        }
+      }
+
+      const updated = await storage.updateTicket(req.params.id, updates);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating ticket:", error);
+      res.status(500).json({ message: "Failed to update ticket" });
+    }
+  });
+
+  // Add message to ticket (admin)
+  app.post("/api/admin/tickets/:id/messages", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const { message } = req.body;
+      const ticket = await storage.getTicket(req.params.id);
+      
+      if (!ticket) {
+        return res.status(404).json({ message: "Ticket not found" });
+      }
+
+      const ticketMessage = await storage.addTicketMessage({
+        ticketId: req.params.id,
+        senderId: req.user.id,
+        isAdmin: true,
+        message,
+      });
+
+      // Update ticket to in_progress if it was open
+      if (ticket.status === "open") {
+        await storage.updateTicket(req.params.id, { status: "in_progress" });
+      }
+
+      res.status(201).json(ticketMessage);
+    } catch (error) {
+      console.error("Error adding message:", error);
+      res.status(500).json({ message: "Failed to add message" });
+    }
+  });
+
+  // ======== USER TICKET ROUTES ========
+
+  // Get user's tickets
+  app.get("/api/tickets", isAuthenticated, async (req: any, res) => {
+    try {
+      const tickets = await storage.getTicketsByUser(req.user.id);
+      res.json(tickets);
+    } catch (error) {
+      console.error("Error fetching user tickets:", error);
+      res.status(500).json({ message: "Failed to fetch tickets" });
+    }
+  });
+
+  // Get single ticket (user)
+  app.get("/api/tickets/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const ticket = await storage.getTicket(req.params.id);
+      if (!ticket) {
+        return res.status(404).json({ message: "Ticket not found" });
+      }
+      
+      // Verify user owns this ticket
+      if (ticket.userId !== req.user.id) {
+        return res.status(403).json({ message: "Not authorized to view this ticket" });
+      }
+      
+      res.json(ticket);
+    } catch (error) {
+      console.error("Error fetching ticket:", error);
+      res.status(500).json({ message: "Failed to fetch ticket" });
+    }
+  });
+
+  // Create ticket (user)
+  app.post("/api/tickets", isAuthenticated, async (req: any, res) => {
+    try {
+      const { subject, message } = req.body;
+      
+      if (!subject || !message) {
+        return res.status(400).json({ message: "Subject and message are required" });
+      }
+
+      // Get user's app user record to find their location
+      const appUser = await storage.getAppUserByAuthId(req.user.id);
+      if (!appUser || !appUser.locationId) {
+        return res.status(400).json({ message: "User must be assigned to a location to create tickets" });
+      }
+
+      const ticket = await storage.createTicket({
+        locationId: appUser.locationId,
+        userId: req.user.id,
+        subject,
+        status: "open",
+      });
+
+      // Add the initial message
+      await storage.addTicketMessage({
+        ticketId: ticket.id,
+        senderId: req.user.id,
+        isAdmin: false,
+        message,
+      });
+
+      res.status(201).json(ticket);
+    } catch (error) {
+      console.error("Error creating ticket:", error);
+      res.status(500).json({ message: "Failed to create ticket" });
+    }
+  });
+
+  // Add message to ticket (user)
+  app.post("/api/tickets/:id/messages", isAuthenticated, async (req: any, res) => {
+    try {
+      const { message } = req.body;
+      const ticket = await storage.getTicket(req.params.id);
+      
+      if (!ticket) {
+        return res.status(404).json({ message: "Ticket not found" });
+      }
+
+      // Verify user owns this ticket
+      if (ticket.userId !== req.user.id) {
+        return res.status(403).json({ message: "Not authorized to message this ticket" });
+      }
+
+      // Don't allow messages on closed tickets
+      if (ticket.status === "closed") {
+        return res.status(400).json({ message: "Cannot add messages to closed tickets" });
+      }
+
+      const ticketMessage = await storage.addTicketMessage({
+        ticketId: req.params.id,
+        senderId: req.user.id,
+        isAdmin: false,
+        message,
+      });
+
+      res.status(201).json(ticketMessage);
+    } catch (error) {
+      console.error("Error adding message:", error);
+      res.status(500).json({ message: "Failed to add message" });
     }
   });
 
