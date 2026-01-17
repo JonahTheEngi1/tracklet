@@ -27,6 +27,7 @@ export const locations = pgTable("locations", {
   pricingEnabled: boolean("pricing_enabled").notNull().default(false),
   pricingType: pricingTypeEnum("pricing_type").default("per_pound"),
   perPoundRate: decimal("per_pound_rate", { precision: 10, scale: 2 }),
+  isSuspended: boolean("is_suspended").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -92,6 +93,32 @@ export const locationBackups = pgTable("location_backups", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Ticket Status Enum
+export const ticketStatusEnum = pgEnum("ticket_status", ["open", "in_progress", "resolved", "closed"]);
+
+// Support Tickets
+export const tickets = pgTable("tickets", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  locationId: varchar("location_id").notNull(),
+  userId: varchar("user_id").notNull(),
+  subject: text("subject").notNull(),
+  status: ticketStatusEnum("status").notNull().default("open"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  resolvedAt: timestamp("resolved_at"),
+  archivedBinId: text("archived_bin_id"),
+});
+
+// Ticket Messages
+export const ticketMessages = pgTable("ticket_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ticketId: varchar("ticket_id").notNull(),
+  senderId: varchar("sender_id").notNull(),
+  isAdmin: boolean("is_admin").notNull().default(false),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Relations
 export const locationsRelations = relations(locations, ({ many }) => ({
   storageLocations: many(storageLocations),
@@ -139,6 +166,21 @@ export const archivedPackagesRelations = relations(archivedPackages, ({ one }) =
   }),
 }));
 
+export const ticketsRelations = relations(tickets, ({ one, many }) => ({
+  location: one(locations, {
+    fields: [tickets.locationId],
+    references: [locations.id],
+  }),
+  messages: many(ticketMessages),
+}));
+
+export const ticketMessagesRelations = relations(ticketMessages, ({ one }) => ({
+  ticket: one(tickets, {
+    fields: [ticketMessages.ticketId],
+    references: [tickets.id],
+  }),
+}));
+
 // Insert schemas
 export const insertLocationSchema = createInsertSchema(locations).omit({
   id: true,
@@ -166,6 +208,19 @@ export const insertAppUserSchema = createInsertSchema(appUsers).omit({
   createdAt: true,
 });
 
+export const insertTicketSchema = createInsertSchema(tickets).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  resolvedAt: true,
+  archivedBinId: true,
+});
+
+export const insertTicketMessageSchema = createInsertSchema(ticketMessages).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type Location = typeof locations.$inferSelect;
 export type InsertLocation = z.infer<typeof insertLocationSchema>;
@@ -186,6 +241,18 @@ export type ArchivedPackage = typeof archivedPackages.$inferSelect;
 
 export type BackupSettings = typeof backupSettings.$inferSelect;
 export type LocationBackup = typeof locationBackups.$inferSelect;
+
+export type Ticket = typeof tickets.$inferSelect;
+export type InsertTicket = z.infer<typeof insertTicketSchema>;
+
+export type TicketMessage = typeof ticketMessages.$inferSelect;
+export type InsertTicketMessage = z.infer<typeof insertTicketMessageSchema>;
+
+export type TicketWithMessages = Ticket & {
+  messages: TicketMessage[];
+  userName?: string;
+  locationName?: string;
+};
 
 // Extended types for frontend
 export type PackageWithStorageLocation = Package & {
