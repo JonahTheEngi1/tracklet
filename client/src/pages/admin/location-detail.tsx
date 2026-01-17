@@ -1,10 +1,24 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Link, useParams, useLocation } from "wouter";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { StatsCard } from "@/components/stats-card";
 import { CardGridSkeleton, TableSkeleton } from "@/components/loading-skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Building2,
   Package,
@@ -14,11 +28,19 @@ import {
   DollarSign,
   ArrowLeft,
   ExternalLink,
+  Trash2,
+  Ban,
+  CheckCircle,
+  AlertTriangle,
 } from "lucide-react";
 import type { LocationWithDetails, AppUserWithDetails } from "@shared/schema";
 
 export default function LocationDetail() {
   const { id } = useParams<{ id: string }>();
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
 
   const { data: location, isLoading: locationLoading } = useQuery<LocationWithDetails>({
     queryKey: ["/api/admin/locations", id],
@@ -26,6 +48,46 @@ export default function LocationDetail() {
 
   const { data: users, isLoading: usersLoading } = useQuery<AppUserWithDetails[]>({
     queryKey: ["/api/admin/locations", id, "users"],
+  });
+
+  const suspendMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/admin/locations/${id}/suspend`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/locations"] });
+      toast({ title: "Location suspended", description: "Users can no longer access this location." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to suspend location", variant: "destructive" });
+    },
+  });
+
+  const unsuspendMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/admin/locations/${id}/unsuspend`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/locations"] });
+      toast({ title: "Location reactivated", description: "Users can now access this location." });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to reactivate location", variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("DELETE", `/api/admin/locations/${id}`, { confirmName: deleteConfirmName });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/locations"] });
+      toast({ title: "Location deleted", description: "A backup was saved before deletion." });
+      navigate("/admin/locations");
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to delete location", variant: "destructive" });
+    },
   });
 
   const isLoading = locationLoading || usersLoading;
@@ -71,8 +133,14 @@ export default function LocationDetail() {
             </Button>
           </Link>
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-semibold">{location.name}</h1>
+              {location.isSuspended && (
+                <Badge variant="destructive">
+                  <Ban className="w-3 h-3 mr-1" />
+                  Suspended
+                </Badge>
+              )}
               {location.pricingEnabled && (
                 <Badge variant="secondary">
                   <DollarSign className="w-3 h-3 mr-1" />
@@ -225,6 +293,115 @@ export default function LocationDetail() {
           </CardContent>
         </Card>
       )}
+
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-destructive" />
+            <CardTitle className="text-destructive">Danger Zone</CardTitle>
+          </div>
+          <CardDescription>
+            These actions are irreversible. Please proceed with caution.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-4 p-4 rounded-lg border flex-wrap">
+            <div>
+              <p className="font-medium">
+                {location.isSuspended ? "Reactivate Location" : "Suspend Location"}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {location.isSuspended
+                  ? "Allow users to access this location again."
+                  : "Temporarily disable access for all users at this location."}
+              </p>
+            </div>
+            {location.isSuspended ? (
+              <Button
+                variant="outline"
+                onClick={() => unsuspendMutation.mutate()}
+                disabled={unsuspendMutation.isPending}
+                data-testid="button-unsuspend-location"
+              >
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Reactivate
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={() => suspendMutation.mutate()}
+                disabled={suspendMutation.isPending}
+                data-testid="button-suspend-location"
+              >
+                <Ban className="w-4 h-4 mr-2" />
+                Suspend
+              </Button>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between gap-4 p-4 rounded-lg border border-destructive/50 flex-wrap">
+            <div>
+              <p className="font-medium text-destructive">Delete Location</p>
+              <p className="text-sm text-muted-foreground">
+                Permanently delete this location and all associated data. A backup will be saved.
+              </p>
+            </div>
+            <Button
+              variant="destructive"
+              onClick={() => setShowDeleteDialog(true)}
+              data-testid="button-delete-location"
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete Location
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Location</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-4">
+              <p>
+                This action cannot be undone. This will permanently delete the location
+                <strong className="text-foreground"> {location.name}</strong> and all associated:
+              </p>
+              <ul className="list-disc list-inside space-y-1 text-sm">
+                <li>Packages ({location.packageCount || 0} total)</li>
+                <li>Storage locations ({location.storageLocations?.length || 0} total)</li>
+                <li>User assignments ({users?.length || 0} users)</li>
+                <li>Pricing tiers</li>
+              </ul>
+              <p className="text-sm">
+                A backup will be automatically saved to JSONBin before deletion.
+              </p>
+              <div className="pt-2">
+                <p className="text-sm font-medium mb-2">
+                  Type <span className="font-mono bg-muted px-1 rounded">{location.name}</span> to confirm:
+                </p>
+                <Input
+                  value={deleteConfirmName}
+                  onChange={(e) => setDeleteConfirmName(e.target.value)}
+                  placeholder="Enter location name"
+                  data-testid="input-confirm-delete"
+                />
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteConfirmName("")}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteConfirmName !== location.name || deleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-delete"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete Location"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
