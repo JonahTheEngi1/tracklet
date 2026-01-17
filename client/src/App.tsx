@@ -19,9 +19,11 @@ import LocationDetail from "@/pages/admin/location-detail";
 import AdminUsers from "@/pages/admin/users";
 import UserFormPage from "@/pages/admin/user-form-page";
 import BackupsPage from "@/pages/admin/backups";
+import AdminTickets from "@/pages/admin/tickets";
 import LocationDashboard from "@/pages/location/dashboard";
 import StorageLocationsPage from "@/pages/location/storage";
 import LocationUsersPage from "@/pages/location/users";
+import UserTickets from "@/pages/location/tickets";
 import { SidebarSkeleton } from "@/components/loading-skeleton";
 import type { AppUserWithDetails, Location } from "@shared/schema";
 
@@ -79,6 +81,9 @@ function PreviewLayout({ locationId, locationName, role }: { locationId: string;
               <Route path="/users">
                 {role === "manager" ? <LocationUsersPage locationId={locationId} /> : <NotFound />}
               </Route>
+              <Route path="/tickets">
+                <UserTickets locationId={locationId} />
+              </Route>
               <Route component={NotFound} />
             </Switch>
           </main>
@@ -93,7 +98,7 @@ function LocationLayout({ children, locationId }: { children: React.ReactNode; l
     queryKey: ["/api/auth/app-user"],
   });
 
-  const { data: location } = useQuery<Location>({
+  const { data: location, error } = useQuery<Location>({
     queryKey: ["/api/locations", locationId],
   });
 
@@ -101,6 +106,35 @@ function LocationLayout({ children, locationId }: { children: React.ReactNode; l
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3rem",
   };
+
+  // Check if location is suspended
+  if (location?.isSuspended) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center p-6 max-w-md">
+          <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-destructive" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-semibold mb-2">Location Suspended</h2>
+          <p className="text-muted-foreground mb-4">
+            Your location <span className="font-medium">{location.name}</span> has been temporarily suspended. 
+            Please contact an administrator for assistance.
+          </p>
+          <button 
+            onClick={() => {
+              fetch("/api/logout", { method: "POST", credentials: "include" })
+                .then(() => window.location.href = "/");
+            }}
+            className="text-primary hover:underline"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <SidebarProvider style={style as React.CSSProperties}>
@@ -123,8 +157,15 @@ function LocationLayout({ children, locationId }: { children: React.ReactNode; l
 }
 
 function AuthenticatedRouter() {
-  const { data: appUser, isLoading } = useQuery<AppUserWithDetails>({
+  const { data: appUser, isLoading, error } = useQuery<AppUserWithDetails>({
     queryKey: ["/api/auth/app-user"],
+    retry: (failureCount, error: any) => {
+      // Don't retry on LOCATION_SUSPENDED
+      if (error?.message?.includes("LOCATION_SUSPENDED") || error?.code === "LOCATION_SUSPENDED") {
+        return false;
+      }
+      return failureCount < 3;
+    },
   });
   const { preview } = usePreview();
 
@@ -139,6 +180,34 @@ function AuthenticatedRouter() {
             <div className="h-8 w-48 bg-muted rounded" />
             <div className="h-4 w-64 bg-muted rounded" />
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Check for location suspended error
+  if (error && (error as any)?.message?.includes("suspended")) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center p-6 max-w-md">
+          <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-destructive" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-semibold mb-2">Location Suspended</h2>
+          <p className="text-muted-foreground mb-4">
+            Your location has been temporarily suspended. Please contact an administrator for assistance.
+          </p>
+          <button 
+            onClick={() => {
+              fetch("/api/logout", { method: "POST", credentials: "include" })
+                .then(() => window.location.href = "/");
+            }}
+            className="text-primary hover:underline"
+          >
+            Sign out
+          </button>
         </div>
       </div>
     );
@@ -189,6 +258,7 @@ function AuthenticatedRouter() {
           <Route path="/admin/users" component={AdminUsers} />
           <Route path="/admin/users/new" component={UserFormPage} />
           <Route path="/admin/backups" component={BackupsPage} />
+          <Route path="/admin/tickets" component={AdminTickets} />
           <Route path="/location/:id">
             {(params) => (
               <LocationLayout locationId={params.id}>
@@ -238,6 +308,9 @@ function AuthenticatedRouter() {
         <Route path="/users">
           {appUser.role === "manager" ? <LocationUsersPage locationId={userLocationId} /> : <NotFound />}
         </Route>
+        <Route path="/tickets">
+          <UserTickets locationId={userLocationId} />
+        </Route>
         <Route path="/location/:id">
           {(params) => <LocationDashboard locationId={params.id} />}
         </Route>
@@ -246,6 +319,9 @@ function AuthenticatedRouter() {
         </Route>
         <Route path="/location/:id/users">
           {(params) => appUser.role === "manager" ? <LocationUsersPage locationId={params.id} /> : <NotFound />}
+        </Route>
+        <Route path="/location/:id/tickets">
+          {(params) => <UserTickets locationId={params.id} />}
         </Route>
         <Route component={NotFound} />
       </Switch>
