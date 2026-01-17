@@ -8,6 +8,8 @@ import {
   users,
   backupSettings,
   locationBackups,
+  tickets,
+  ticketMessages,
   type Location,
   type InsertLocation,
   type StorageLocation,
@@ -26,6 +28,11 @@ import {
   type ArchivedPackage,
   type BackupSettings,
   type LocationBackup,
+  type Ticket,
+  type InsertTicket,
+  type TicketMessage,
+  type InsertTicketMessage,
+  type TicketWithMessages,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, ilike, sql, desc, count } from "drizzle-orm";
@@ -84,6 +91,20 @@ export interface IStorage {
   addLocationBackup(locationId: string, binId: string): Promise<LocationBackup>;
   deleteOldestBackup(locationId: string): Promise<void>;
   getLocationDataForBackup(locationId: string): Promise<any>;
+
+  // Location Suspension
+  suspendLocation(id: string): Promise<Location | undefined>;
+  unsuspendLocation(id: string): Promise<Location | undefined>;
+
+  // Ticket Operations
+  getTickets(): Promise<TicketWithMessages[]>;
+  getTicketsByLocation(locationId: string): Promise<TicketWithMessages[]>;
+  getTicketsByUser(userId: string): Promise<TicketWithMessages[]>;
+  getTicket(id: string): Promise<TicketWithMessages | undefined>;
+  createTicket(ticket: InsertTicket): Promise<Ticket>;
+  updateTicket(id: string, ticket: Partial<Ticket>): Promise<Ticket | undefined>;
+  addTicketMessage(message: InsertTicketMessage): Promise<TicketMessage>;
+  getTicketMessages(ticketId: string): Promise<TicketMessage[]>;
 }
 
 // Helper to calculate package cost
@@ -646,6 +667,135 @@ export class DatabaseStorage implements IStorage {
       users: usersList,
       backupDate: new Date().toISOString(),
     };
+  }
+
+  // Location Suspension
+  async suspendLocation(id: string): Promise<Location | undefined> {
+    const [location] = await db
+      .update(locations)
+      .set({ isSuspended: true })
+      .where(eq(locations.id, id))
+      .returning();
+    return location;
+  }
+
+  async unsuspendLocation(id: string): Promise<Location | undefined> {
+    const [location] = await db
+      .update(locations)
+      .set({ isSuspended: false })
+      .where(eq(locations.id, id))
+      .returning();
+    return location;
+  }
+
+  // Ticket Operations
+  async getTickets(): Promise<TicketWithMessages[]> {
+    const allTickets = await db.select().from(tickets).orderBy(desc(tickets.createdAt));
+    const result: TicketWithMessages[] = [];
+    
+    for (const ticket of allTickets) {
+      const messages = await this.getTicketMessages(ticket.id);
+      const [user] = await db.select().from(users).where(eq(users.id, ticket.userId));
+      const [location] = await db.select().from(locations).where(eq(locations.id, ticket.locationId));
+      
+      result.push({
+        ...ticket,
+        messages,
+        userName: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Unknown' : 'Unknown',
+        locationName: location?.name || 'Unknown',
+      });
+    }
+    
+    return result;
+  }
+
+  async getTicketsByLocation(locationId: string): Promise<TicketWithMessages[]> {
+    const locationTickets = await db
+      .select()
+      .from(tickets)
+      .where(eq(tickets.locationId, locationId))
+      .orderBy(desc(tickets.createdAt));
+    
+    const result: TicketWithMessages[] = [];
+    
+    for (const ticket of locationTickets) {
+      const messages = await this.getTicketMessages(ticket.id);
+      const [user] = await db.select().from(users).where(eq(users.id, ticket.userId));
+      
+      result.push({
+        ...ticket,
+        messages,
+        userName: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Unknown' : 'Unknown',
+      });
+    }
+    
+    return result;
+  }
+
+  async getTicketsByUser(userId: string): Promise<TicketWithMessages[]> {
+    const userTickets = await db
+      .select()
+      .from(tickets)
+      .where(eq(tickets.userId, userId))
+      .orderBy(desc(tickets.createdAt));
+    
+    const result: TicketWithMessages[] = [];
+    
+    for (const ticket of userTickets) {
+      const messages = await this.getTicketMessages(ticket.id);
+      const [location] = await db.select().from(locations).where(eq(locations.id, ticket.locationId));
+      
+      result.push({
+        ...ticket,
+        messages,
+        locationName: location?.name || 'Unknown',
+      });
+    }
+    
+    return result;
+  }
+
+  async getTicket(id: string): Promise<TicketWithMessages | undefined> {
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
+    if (!ticket) return undefined;
+    
+    const messages = await this.getTicketMessages(id);
+    const [user] = await db.select().from(users).where(eq(users.id, ticket.userId));
+    const [location] = await db.select().from(locations).where(eq(locations.id, ticket.locationId));
+    
+    return {
+      ...ticket,
+      messages,
+      userName: user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email || 'Unknown' : 'Unknown',
+      locationName: location?.name || 'Unknown',
+    };
+  }
+
+  async createTicket(ticket: InsertTicket): Promise<Ticket> {
+    const [created] = await db.insert(tickets).values(ticket).returning();
+    return created;
+  }
+
+  async updateTicket(id: string, ticketUpdate: Partial<Ticket>): Promise<Ticket | undefined> {
+    const [updated] = await db
+      .update(tickets)
+      .set({ ...ticketUpdate, updatedAt: new Date() })
+      .where(eq(tickets.id, id))
+      .returning();
+    return updated;
+  }
+
+  async addTicketMessage(message: InsertTicketMessage): Promise<TicketMessage> {
+    const [created] = await db.insert(ticketMessages).values(message).returning();
+    return created;
+  }
+
+  async getTicketMessages(ticketId: string): Promise<TicketMessage[]> {
+    return db
+      .select()
+      .from(ticketMessages)
+      .where(eq(ticketMessages.ticketId, ticketId))
+      .orderBy(ticketMessages.createdAt);
   }
 }
 
