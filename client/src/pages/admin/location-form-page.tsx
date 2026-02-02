@@ -111,6 +111,9 @@ export default function LocationFormPage() {
                       maxWeight: String(t.maxWeight),
                       price: String(t.price),
                     })),
+                    invoiceEnabled: location.invoiceEnabled || false,
+                    invoiceLogo: location.invoiceLogo || null,
+                    invoiceBusinessName: location.invoiceBusinessName || "",
                   }
                 : undefined
             }
