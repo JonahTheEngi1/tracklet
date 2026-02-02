@@ -25,15 +25,17 @@ import {
   Warehouse,
   Database,
   Ticket,
+  FileText,
 } from "lucide-react";
 
 interface AppSidebarProps {
   userRole: "admin" | "manager" | "employee";
   locationId?: string;
   locationName?: string;
+  invoiceEnabled?: boolean;
 }
 
-export function AppSidebar({ userRole, locationId, locationName }: AppSidebarProps) {
+export function AppSidebar({ userRole, locationId, locationName, invoiceEnabled }: AppSidebarProps) {
   const [location] = useLocation();
   const { user, logout } = useAuth();
 
@@ -49,6 +51,7 @@ export function AppSidebar({ userRole, locationId, locationName }: AppSidebarPro
   const locationItems = [
     { title: "Packages", url: "/", icon: Package },
     { title: "Storage", url: "/storage", icon: Warehouse },
+    ...(invoiceEnabled ? [{ title: "Invoices", url: "/invoices", icon: FileText }] : []),
     { title: "Users", url: "/users", icon: Users },
     { title: "Support", url: "/tickets", icon: Ticket },
   ];
