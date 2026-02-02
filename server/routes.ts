@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, registerAuthRoutes, isAuthenticated, authStorage } from "./replit_integrations/auth";
-import { insertLocationSchema, insertPackageSchema, insertStorageLocationSchema, insertAppUserSchema } from "@shared/schema";
+import { insertLocationSchema, insertPackageSchema, insertStorageLocationSchema, insertAppUserSchema, insertInvoiceSchema, insertInvoiceItemSchema } from "@shared/schema";
 import { z } from "zod";
 
 // Backup scheduler
@@ -1148,6 +1148,212 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error adding message:", error);
       res.status(500).json({ message: "Failed to add message" });
+    }
+  });
+
+  // Invoice Routes
+  // Get invoices for a location
+  app.get("/api/locations/:locationId/invoices", isAuthenticated, async (req: any, res) => {
+    try {
+      const { locationId } = req.params;
+      
+      // Verify user has access to this location
+      const appUser = await storage.getAppUserByAuthId(req.user.id);
+      if (!appUser) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      
+      if (appUser.role !== "admin" && appUser.locationId !== locationId) {
+        return res.status(403).json({ message: "Not authorized to view invoices for this location" });
+      }
+
+      // Check if invoicing is enabled for this location
+      const location = await storage.getLocation(locationId);
+      if (!location?.invoiceEnabled) {
+        return res.status(400).json({ message: "Invoicing is not enabled for this location" });
+      }
+
+      const invoiceList = await storage.getInvoicesByLocation(locationId);
+      res.json(invoiceList);
+    } catch (error) {
+      console.error("Error fetching invoices:", error);
+      res.status(500).json({ message: "Failed to fetch invoices" });
+    }
+  });
+
+  // Get single invoice
+  app.get("/api/invoices/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const invoice = await storage.getInvoice(req.params.id);
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      // Verify user has access
+      const appUser = await storage.getAppUserByAuthId(req.user.id);
+      if (!appUser) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      
+      if (appUser.role !== "admin" && appUser.locationId !== invoice.locationId) {
+        return res.status(403).json({ message: "Not authorized to view this invoice" });
+      }
+
+      res.json(invoice);
+    } catch (error) {
+      console.error("Error fetching invoice:", error);
+      res.status(500).json({ message: "Failed to fetch invoice" });
+    }
+  });
+
+  // Create invoice request schema
+  const createInvoiceSchema = z.object({
+    billedTo: z.string().min(1, "Billed to is required"),
+    dueDate: z.string().min(1, "Due date is required"),
+    items: z.array(z.object({
+      name: z.string().min(1, "Item name is required"),
+      quantity: z.string().refine(val => !isNaN(parseInt(val)) && parseInt(val) > 0, "Quantity must be a positive number"),
+      unitPrice: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) >= 0, "Price must be a valid positive number"),
+    })).min(1, "At least one item is required"),
+  });
+
+  // Create invoice
+  app.post("/api/locations/:locationId/invoices", isAuthenticated, async (req: any, res) => {
+    try {
+      const { locationId } = req.params;
+
+      // Validate request body
+      const parseResult = createInvoiceSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ 
+          message: "Validation failed", 
+          errors: parseResult.error.flatten().fieldErrors 
+        });
+      }
+      
+      const { billedTo, dueDate, items } = parseResult.data;
+
+      // Verify user has access to this location
+      const appUser = await storage.getAppUserByAuthId(req.user.id);
+      if (!appUser) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      
+      if (appUser.role !== "admin" && appUser.locationId !== locationId) {
+        return res.status(403).json({ message: "Not authorized to create invoices for this location" });
+      }
+
+      // Check if invoicing is enabled
+      const location = await storage.getLocation(locationId);
+      if (!location?.invoiceEnabled) {
+        return res.status(400).json({ message: "Invoicing is not enabled for this location" });
+      }
+
+      // Generate invoice number
+      const invoiceNumber = await storage.getNextInvoiceNumber(locationId);
+
+      // Calculate totals with validation
+      let subtotal = 0;
+      const processedItems = items.map((item) => {
+        const qty = parseInt(item.quantity);
+        const price = parseFloat(item.unitPrice);
+        const itemTotal = qty * price;
+        
+        if (isNaN(itemTotal) || itemTotal < 0) {
+          throw new Error(`Invalid item calculation: ${item.name}`);
+        }
+        
+        subtotal += itemTotal;
+        return {
+          name: item.name,
+          quantity: qty,
+          unitPrice: price.toFixed(2),
+          total: itemTotal.toFixed(2),
+        };
+      });
+
+      const invoice = await storage.createInvoice(
+        {
+          locationId,
+          invoiceNumber,
+          billedTo,
+          dueDate: new Date(dueDate),
+          status: "unpaid",
+          subtotal: subtotal.toFixed(2),
+          total: subtotal.toFixed(2),
+          createdBy: req.user.id,
+        },
+        processedItems
+      );
+
+      res.status(201).json(invoice);
+    } catch (error) {
+      console.error("Error creating invoice:", error);
+      res.status(500).json({ message: "Failed to create invoice" });
+    }
+  });
+
+  // Update invoice status schema
+  const updateInvoiceSchema = z.object({
+    status: z.enum(["paid", "unpaid"]),
+  });
+
+  // Update invoice status
+  app.patch("/api/invoices/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const parseResult = updateInvoiceSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ message: "Invalid status value" });
+      }
+      const { status } = parseResult.data;
+      const invoice = await storage.getInvoice(req.params.id);
+      
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      // Verify user has access
+      const appUser = await storage.getAppUserByAuthId(req.user.id);
+      if (!appUser) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      
+      if (appUser.role !== "admin" && appUser.locationId !== invoice.locationId) {
+        return res.status(403).json({ message: "Not authorized to update this invoice" });
+      }
+
+      const updated = await storage.updateInvoice(req.params.id, { status });
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating invoice:", error);
+      res.status(500).json({ message: "Failed to update invoice" });
+    }
+  });
+
+  // Delete invoice
+  app.delete("/api/invoices/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const invoice = await storage.getInvoice(req.params.id);
+      
+      if (!invoice) {
+        return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      // Verify user has access
+      const appUser = await storage.getAppUserByAuthId(req.user.id);
+      if (!appUser) {
+        return res.status(403).json({ message: "Not authorized" });
+      }
+      
+      if (appUser.role !== "admin" && appUser.locationId !== invoice.locationId) {
+        return res.status(403).json({ message: "Not authorized to delete this invoice" });
+      }
+
+      await storage.deleteInvoice(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting invoice:", error);
+      res.status(500).json({ message: "Failed to delete invoice" });
     }
   });
 
