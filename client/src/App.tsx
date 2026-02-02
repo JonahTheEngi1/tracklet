@@ -24,6 +24,7 @@ import LocationDashboard from "@/pages/location/dashboard";
 import StorageLocationsPage from "@/pages/location/storage";
 import LocationUsersPage from "@/pages/location/users";
 import UserTickets from "@/pages/location/tickets";
+import InvoicesPage from "@/pages/location/invoices";
 import { SidebarSkeleton } from "@/components/loading-skeleton";
 import type { AppUserWithDetails, Location } from "@shared/schema";
 
@@ -51,6 +52,10 @@ function AdminLayout({ children }: { children: React.ReactNode }) {
 }
 
 function PreviewLayout({ locationId, locationName, role }: { locationId: string; locationName: string; role: "manager" | "employee" }) {
+  const { data: previewLocation } = useQuery<Location>({
+    queryKey: ["/api/locations", locationId],
+  });
+
   const style = {
     "--sidebar-width": "16rem",
     "--sidebar-width-icon": "3rem",
@@ -63,6 +68,7 @@ function PreviewLayout({ locationId, locationName, role }: { locationId: string;
           userRole={role} 
           locationId={locationId}
           locationName={locationName}
+          invoiceEnabled={previewLocation?.invoiceEnabled}
         />
         <div className="flex flex-col flex-1 overflow-hidden">
           <PreviewBanner />
@@ -84,6 +90,9 @@ function PreviewLayout({ locationId, locationName, role }: { locationId: string;
               <Route path="/tickets">
                 <UserTickets locationId={locationId} />
               </Route>
+              <Route path="/invoices">
+                <InvoicesPage locationId={locationId} />
+              </Route>
               <Route component={NotFound} />
             </Switch>
           </main>
@@ -98,7 +107,7 @@ function LocationLayout({ children, locationId }: { children: React.ReactNode; l
     queryKey: ["/api/auth/app-user"],
   });
 
-  const { data: location, error } = useQuery<Location>({
+  const { data: locationData, error } = useQuery<Location>({
     queryKey: ["/api/locations", locationId],
   });
 
@@ -108,7 +117,7 @@ function LocationLayout({ children, locationId }: { children: React.ReactNode; l
   };
 
   // Check if location is suspended
-  if (location?.isSuspended) {
+  if (locationData?.isSuspended) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center p-6 max-w-md">
@@ -119,7 +128,7 @@ function LocationLayout({ children, locationId }: { children: React.ReactNode; l
           </div>
           <h2 className="text-xl font-semibold mb-2">Location Suspended</h2>
           <p className="text-muted-foreground mb-4">
-            Your location <span className="font-medium">{location.name}</span> has been temporarily suspended. 
+            Your location <span className="font-medium">{locationData.name}</span> has been temporarily suspended. 
             Please contact an administrator for assistance.
           </p>
           <button 
@@ -142,7 +151,8 @@ function LocationLayout({ children, locationId }: { children: React.ReactNode; l
         <AppSidebar 
           userRole={appUser?.role || "employee"} 
           locationId={locationId}
-          locationName={location?.name}
+          locationName={locationData?.name}
+          invoiceEnabled={locationData?.invoiceEnabled}
         />
         <div className="flex flex-col flex-1 overflow-hidden">
           <header className="flex items-center justify-between gap-4 px-4 py-2 border-b bg-background">
@@ -310,6 +320,9 @@ function AuthenticatedRouter() {
         </Route>
         <Route path="/tickets">
           <UserTickets locationId={userLocationId} />
+        </Route>
+        <Route path="/invoices">
+          <InvoicesPage locationId={userLocationId} />
         </Route>
         <Route path="/location/:id">
           {(params) => <LocationDashboard locationId={params.id} />}
