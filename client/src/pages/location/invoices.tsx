@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { jsPDF } from "jspdf";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -147,7 +146,8 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
     createMutation.mutate({ billedTo, dueDate, items });
   };
 
-  const generatePDF = (invoice: InvoiceWithItems) => {
+  const generatePDF = async (invoice: InvoiceWithItems) => {
+    const { jsPDF } = await import("jspdf");
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     let y = 20;
