@@ -10,6 +10,8 @@ import {
   locationBackups,
   tickets,
   ticketMessages,
+  invoices,
+  invoiceItems,
   type Location,
   type InsertLocation,
   type StorageLocation,
@@ -33,6 +35,11 @@ import {
   type TicketMessage,
   type InsertTicketMessage,
   type TicketWithMessages,
+  type Invoice,
+  type InsertInvoice,
+  type InvoiceItem,
+  type InsertInvoiceItem,
+  type InvoiceWithItems,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, ilike, sql, desc, count } from "drizzle-orm";
@@ -105,6 +112,14 @@ export interface IStorage {
   updateTicket(id: string, ticket: Partial<Ticket>): Promise<Ticket | undefined>;
   addTicketMessage(message: InsertTicketMessage): Promise<TicketMessage>;
   getTicketMessages(ticketId: string): Promise<TicketMessage[]>;
+
+  // Invoice Operations
+  getInvoicesByLocation(locationId: string): Promise<InvoiceWithItems[]>;
+  getInvoice(id: string): Promise<InvoiceWithItems | undefined>;
+  createInvoice(invoice: InsertInvoice, items: Omit<InsertInvoiceItem, "invoiceId">[]): Promise<InvoiceWithItems>;
+  updateInvoice(id: string, invoice: Partial<Invoice>): Promise<Invoice | undefined>;
+  deleteInvoice(id: string): Promise<boolean>;
+  getNextInvoiceNumber(locationId: string): Promise<string>;
 }
 
 // Helper to calculate package cost
@@ -796,6 +811,107 @@ export class DatabaseStorage implements IStorage {
       .from(ticketMessages)
       .where(eq(ticketMessages.ticketId, ticketId))
       .orderBy(ticketMessages.createdAt);
+  }
+
+  // Invoice Operations
+  async getInvoicesByLocation(locationId: string): Promise<InvoiceWithItems[]> {
+    const invoiceList = await db
+      .select()
+      .from(invoices)
+      .where(eq(invoices.locationId, locationId))
+      .orderBy(desc(invoices.createdAt));
+
+    const location = await this.getLocation(locationId);
+    
+    const invoicesWithItems: InvoiceWithItems[] = [];
+    for (const invoice of invoiceList) {
+      const items = await db
+        .select()
+        .from(invoiceItems)
+        .where(eq(invoiceItems.invoiceId, invoice.id));
+      
+      invoicesWithItems.push({
+        ...invoice,
+        items,
+        locationName: location?.name,
+        locationLogo: location?.invoiceLogo || undefined,
+        locationBusinessName: location?.invoiceBusinessName || undefined,
+      });
+    }
+    
+    return invoicesWithItems;
+  }
+
+  async getInvoice(id: string): Promise<InvoiceWithItems | undefined> {
+    const [invoice] = await db
+      .select()
+      .from(invoices)
+      .where(eq(invoices.id, id));
+    
+    if (!invoice) return undefined;
+
+    const items = await db
+      .select()
+      .from(invoiceItems)
+      .where(eq(invoiceItems.invoiceId, id));
+
+    const location = await this.getLocation(invoice.locationId);
+    
+    return {
+      ...invoice,
+      items,
+      locationName: location?.name,
+      locationLogo: location?.invoiceLogo || undefined,
+      locationBusinessName: location?.invoiceBusinessName || undefined,
+    };
+  }
+
+  async createInvoice(invoice: InsertInvoice, items: Omit<InsertInvoiceItem, "invoiceId">[]): Promise<InvoiceWithItems> {
+    const [created] = await db.insert(invoices).values(invoice).returning();
+    
+    const createdItems: InvoiceItem[] = [];
+    for (const item of items) {
+      const [createdItem] = await db
+        .insert(invoiceItems)
+        .values({ ...item, invoiceId: created.id })
+        .returning();
+      createdItems.push(createdItem);
+    }
+
+    const location = await this.getLocation(created.locationId);
+    
+    return {
+      ...created,
+      items: createdItems,
+      locationName: location?.name,
+      locationLogo: location?.invoiceLogo || undefined,
+      locationBusinessName: location?.invoiceBusinessName || undefined,
+    };
+  }
+
+  async updateInvoice(id: string, invoiceUpdate: Partial<Invoice>): Promise<Invoice | undefined> {
+    const [updated] = await db
+      .update(invoices)
+      .set(invoiceUpdate)
+      .where(eq(invoices.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteInvoice(id: string): Promise<boolean> {
+    await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, id));
+    const result = await db.delete(invoices).where(eq(invoices.id, id)).returning();
+    return result.length > 0;
+  }
+
+  async getNextInvoiceNumber(locationId: string): Promise<string> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(invoices)
+      .where(eq(invoices.locationId, locationId));
+    
+    const nextNum = (result?.count || 0) + 1;
+    return `INV-${String(nextNum).padStart(5, "0")}`;
   }
 }
 
