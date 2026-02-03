@@ -162,7 +162,8 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
     }
 
     doc.setFontSize(20);
-    doc.text("INVOICE/RECEIPT", pageWidth / 2, y, { align: "center" });
+    const headerText = invoice.status === "paid" ? "RECEIPT" : "INVOICE";
+    doc.text(headerText, pageWidth / 2, y, { align: "center" });
     y += 10;
 
     doc.setFontSize(14);
