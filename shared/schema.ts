@@ -9,6 +9,7 @@ export * from "./models/auth";
 // Enums
 export const userRoleEnum = pgEnum("user_role", ["admin", "manager", "employee"]);
 export const pricingTypeEnum = pgEnum("pricing_type", ["per_pound", "range_based"]);
+export const invoiceStatusEnum = pgEnum("invoice_status", ["paid", "unpaid"]);
 
 // App Users (distinct from auth users - contains role and location assignment)
 export const appUsers = pgTable("app_users", {
@@ -28,6 +29,9 @@ export const locations = pgTable("locations", {
   pricingType: pricingTypeEnum("pricing_type").default("per_pound"),
   perPoundRate: decimal("per_pound_rate", { precision: 10, scale: 2 }),
   isSuspended: boolean("is_suspended").notNull().default(false),
+  invoiceEnabled: boolean("invoice_enabled").notNull().default(false),
+  invoiceLogo: text("invoice_logo"),
+  invoiceBusinessName: text("invoice_business_name"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -119,6 +123,31 @@ export const ticketMessages = pgTable("ticket_messages", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Invoices
+export const invoices = pgTable("invoices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  locationId: varchar("location_id").notNull(),
+  invoiceNumber: text("invoice_number").notNull(),
+  billedTo: text("billed_to").notNull(),
+  dueDate: timestamp("due_date").notNull(),
+  status: invoiceStatusEnum("status").notNull().default("unpaid"),
+  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull().default("0"),
+  total: decimal("total", { precision: 10, scale: 2 }).notNull().default("0"),
+  createdAt: timestamp("created_at").defaultNow(),
+  createdBy: varchar("created_by").notNull(),
+});
+
+// Invoice Items
+export const invoiceItems = pgTable("invoice_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  invoiceId: varchar("invoice_id").notNull(),
+  name: text("name").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+  total: decimal("total", { precision: 10, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Relations
 export const locationsRelations = relations(locations, ({ many }) => ({
   storageLocations: many(storageLocations),
@@ -181,6 +210,21 @@ export const ticketMessagesRelations = relations(ticketMessages, ({ one }) => ({
   }),
 }));
 
+export const invoicesRelations = relations(invoices, ({ one, many }) => ({
+  location: one(locations, {
+    fields: [invoices.locationId],
+    references: [locations.id],
+  }),
+  items: many(invoiceItems),
+}));
+
+export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
+  invoice: one(invoices, {
+    fields: [invoiceItems.invoiceId],
+    references: [invoices.id],
+  }),
+}));
+
 // Insert schemas
 export const insertLocationSchema = createInsertSchema(locations).omit({
   id: true,
@@ -221,6 +265,16 @@ export const insertTicketMessageSchema = createInsertSchema(ticketMessages).omit
   createdAt: true,
 });
 
+export const insertInvoiceSchema = createInsertSchema(invoices).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertInvoiceItemSchema = createInsertSchema(invoiceItems).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Types
 export type Location = typeof locations.$inferSelect;
 export type InsertLocation = z.infer<typeof insertLocationSchema>;
@@ -247,6 +301,19 @@ export type InsertTicket = z.infer<typeof insertTicketSchema>;
 
 export type TicketMessage = typeof ticketMessages.$inferSelect;
 export type InsertTicketMessage = z.infer<typeof insertTicketMessageSchema>;
+
+export type Invoice = typeof invoices.$inferSelect;
+export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;
+
+export type InvoiceItem = typeof invoiceItems.$inferSelect;
+export type InsertInvoiceItem = z.infer<typeof insertInvoiceItemSchema>;
+
+export type InvoiceWithItems = Invoice & {
+  items: InvoiceItem[];
+  locationName?: string;
+  locationLogo?: string;
+  locationBusinessName?: string;
+};
 
 export type TicketWithMessages = Ticket & {
   messages: TicketMessage[];
