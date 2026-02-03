@@ -152,6 +152,15 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
     const pageWidth = doc.internal.pageSize.getWidth();
     let y = 20;
 
+    // Add logo in top left if available
+    if (invoice.locationLogo) {
+      try {
+        doc.addImage(invoice.locationLogo, "PNG", 15, 10, 30, 30);
+      } catch (e) {
+        console.error("Failed to add logo to PDF:", e);
+      }
+    }
+
     doc.setFontSize(20);
     doc.text("INVOICE", pageWidth / 2, y, { align: "center" });
     y += 10;
