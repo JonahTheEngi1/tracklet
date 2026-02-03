@@ -162,7 +162,7 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
     }
 
     doc.setFontSize(20);
-    doc.text("INVOICE", pageWidth / 2, y, { align: "center" });
+    doc.text("INVOICE/RECEIPT", pageWidth / 2, y, { align: "center" });
     y += 10;
 
     doc.setFontSize(14);
