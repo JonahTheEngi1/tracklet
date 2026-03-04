@@ -25,7 +25,7 @@ import {
 import { TableSkeleton } from "@/components/loading-skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { FileText, Plus, Trash2, Eye, Download, Check, X } from "lucide-react";
+import { FileText, Plus, Ban, Eye, Download, Check, X, Trash2 } from "lucide-react";
 import type { InvoiceWithItems, Location } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -87,16 +87,16 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
     },
   });
 
-  const deleteMutation = useMutation({
+  const voidMutation = useMutation({
     mutationFn: async (id: string) => {
-      return apiRequest("DELETE", `/api/invoices/${id}`);
+      return apiRequest("PATCH", `/api/invoices/${id}/void`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/locations", locationId, "invoices"] });
-      toast({ title: "Invoice deleted" });
+      toast({ title: "Invoice voided", description: "The invoice has been voided and will be preserved for records." });
     },
     onError: () => {
-      toast({ title: "Error", description: "Failed to delete invoice", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to void invoice", variant: "destructive" });
     },
   });
 
@@ -162,7 +162,7 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
     }
 
     doc.setFontSize(20);
-    const headerText = invoice.status === "paid" ? "RECEIPT" : "INVOICE";
+    const headerText = invoice.status === "voided" ? "VOIDED" : invoice.status === "paid" ? "RECEIPT" : "INVOICE";
     doc.text(headerText, pageWidth / 2, y, { align: "center" });
     y += 10;
 
@@ -282,7 +282,7 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
                     <TableCell>${invoice.total}</TableCell>
                     <TableCell>{format(new Date(invoice.dueDate), "MMM d, yyyy")}</TableCell>
                     <TableCell>
-                      <Badge variant={invoice.status === "paid" ? "default" : "secondary"}>
+                      <Badge variant={invoice.status === "paid" ? "default" : invoice.status === "voided" ? "destructive" : "secondary"}>
                         {invoice.status}
                       </Badge>
                     </TableCell>
@@ -307,33 +307,37 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
                         >
                           <Download className="w-4 h-4" />
                         </Button>
-                        {invoice.status === "unpaid" ? (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => updateStatusMutation.mutate({ id: invoice.id, status: "paid" })}
-                            data-testid={`button-mark-paid-${invoice.id}`}
-                          >
-                            <Check className="w-4 h-4 text-green-600" />
-                          </Button>
-                        ) : (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => updateStatusMutation.mutate({ id: invoice.id, status: "unpaid" })}
-                            data-testid={`button-mark-unpaid-${invoice.id}`}
-                          >
-                            <X className="w-4 h-4 text-orange-600" />
-                          </Button>
+                        {invoice.status !== "voided" && (
+                          <>
+                            {invoice.status === "unpaid" ? (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => updateStatusMutation.mutate({ id: invoice.id, status: "paid" })}
+                                data-testid={`button-mark-paid-${invoice.id}`}
+                              >
+                                <Check className="w-4 h-4 text-green-600" />
+                              </Button>
+                            ) : (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => updateStatusMutation.mutate({ id: invoice.id, status: "unpaid" })}
+                                data-testid={`button-mark-unpaid-${invoice.id}`}
+                              >
+                                <X className="w-4 h-4 text-orange-600" />
+                              </Button>
+                            )}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => voidMutation.mutate(invoice.id)}
+                              data-testid={`button-void-invoice-${invoice.id}`}
+                            >
+                              <Ban className="w-4 h-4 text-destructive" />
+                            </Button>
+                          </>
                         )}
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          onClick={() => deleteMutation.mutate(invoice.id)}
-                          data-testid={`button-delete-invoice-${invoice.id}`}
-                        >
-                          <Trash2 className="w-4 h-4 text-destructive" />
-                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -482,7 +486,7 @@ export default function InvoicesPage({ locationId }: InvoicesPageProps) {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Status:</span>
-                  <Badge variant={selectedInvoice.status === "paid" ? "default" : "secondary"}>
+                  <Badge variant={selectedInvoice.status === "paid" ? "default" : selectedInvoice.status === "voided" ? "destructive" : "secondary"}>
                     {selectedInvoice.status}
                   </Badge>
                 </div>

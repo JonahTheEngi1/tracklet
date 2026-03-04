@@ -9,7 +9,7 @@ export * from "./models/auth";
 // Enums
 export const userRoleEnum = pgEnum("user_role", ["admin", "manager", "employee"]);
 export const pricingTypeEnum = pgEnum("pricing_type", ["per_pound", "range_based"]);
-export const invoiceStatusEnum = pgEnum("invoice_status", ["paid", "unpaid"]);
+export const invoiceStatusEnum = pgEnum("invoice_status", ["paid", "unpaid", "voided"]);
 
 // App Users (distinct from auth users - contains role and location assignment)
 export const appUsers = pgTable("app_users", {
@@ -339,6 +339,7 @@ export type AppUserWithDetails = AppUser & {
   firstName?: string;
   lastName?: string;
   profileImageUrl?: string;
+  locationName?: string;
 };
 
 export type RecipientSummary = {

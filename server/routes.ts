@@ -1312,6 +1312,10 @@ export async function registerRoutes(
         return res.status(404).json({ message: "Invoice not found" });
       }
 
+      if (invoice.status === "voided") {
+        return res.status(400).json({ message: "Cannot update a voided invoice" });
+      }
+
       // Verify user has access
       const appUser = await storage.getAppUserByAuthId(req.user.id);
       if (!appUser) {
@@ -1330,13 +1334,17 @@ export async function registerRoutes(
     }
   });
 
-  // Delete invoice
-  app.delete("/api/invoices/:id", isAuthenticated, async (req: any, res) => {
+  // Void invoice
+  app.patch("/api/invoices/:id/void", isAuthenticated, async (req: any, res) => {
     try {
       const invoice = await storage.getInvoice(req.params.id);
       
       if (!invoice) {
         return res.status(404).json({ message: "Invoice not found" });
+      }
+
+      if (invoice.status === "voided") {
+        return res.status(400).json({ message: "Invoice is already voided" });
       }
 
       // Verify user has access
@@ -1346,14 +1354,14 @@ export async function registerRoutes(
       }
       
       if (appUser.role !== "admin" && appUser.locationId !== invoice.locationId) {
-        return res.status(403).json({ message: "Not authorized to delete this invoice" });
+        return res.status(403).json({ message: "Not authorized to void this invoice" });
       }
 
-      await storage.deleteInvoice(req.params.id);
-      res.json({ success: true });
+      const updated = await storage.voidInvoice(req.params.id);
+      res.json(updated);
     } catch (error) {
-      console.error("Error deleting invoice:", error);
-      res.status(500).json({ message: "Failed to delete invoice" });
+      console.error("Error voiding invoice:", error);
+      res.status(500).json({ message: "Failed to void invoice" });
     }
   });
 

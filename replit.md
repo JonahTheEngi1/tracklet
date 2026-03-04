@@ -104,3 +104,39 @@ Preferred communication style: Simple, everyday language.
 - **Rotation**: Maximum 5 backups per location - oldest deleted when creating 6th backup
 - **Data**: Backs up location, storage locations, pricing tiers, packages, and users (excludes cold storage)
 - **Admin Route**: /admin/backups for configuration and manual backup runs
+
+### Location Suspension Feature
+- **Purpose**: Temporarily disable access to a location without deleting data
+- **Admin Controls**: Suspend/Unsuspend buttons in location detail "Danger Zone"
+- **User Experience**: Suspended location users see a "Location Suspended" message with sign-out option
+- **Database**: `isSuspended` boolean field on locations table
+- **API Endpoints**: POST /api/admin/locations/:id/suspend and /unsuspend
+
+### Location Deletion Feature
+- **Purpose**: Permanently delete a location and all associated data
+- **Safety**: Requires typing the exact location name to confirm deletion
+- **Auto-Backup**: Creates JSONBin backup before deletion (if API key configured)
+- **Cascade**: Deletes all packages, storage locations, pricing tiers, and user assignments
+- **Admin Route**: DELETE /api/admin/locations/:id with confirmName body parameter
+
+### Support Tickets Feature
+- **Purpose**: Allow users to submit support requests and communicate with admins
+- **Database Tables**: `tickets` and `ticket_messages` with status enum (open, in_progress, resolved, closed)
+- **User Flow**: Create tickets from /tickets page, reply to existing tickets, view status updates
+- **Admin Flow**: View all tickets at /admin/tickets, update status, respond to users
+- **Auto-Archive**: Resolved tickets are automatically archived to JSONBin
+- **Sidebar Links**: "Tickets" for admin, "Support" for regular users
+
+### Invoice Generation Feature (February 2026)
+- **Purpose**: Generate and manage invoices for customers within locations
+- **Location Settings**: Toggle invoicing per location in admin location form (invoiceEnabled, invoiceLogo, invoiceBusinessName)
+- **Database Tables**: `invoices` and `invoice_items` with status (paid/unpaid/voided), auto-generated invoice numbers (INV-00001)
+- **Line Items**: Support for multiple items per invoice with quantity, unit price, and calculated totals
+- **PDF Export**: Uses jsPDF library for professional PDF download with header (INVOICE/RECEIPT/VOIDED based on status), items table, and total
+- **Void vs Delete**: Invoices cannot be deleted to preserve numbering sequence. Instead, invoices are voided (status set to "voided"). Voided invoices remain visible but cannot have their status changed.
+- **API Routes**: 
+  - GET /api/locations/:locationId/invoices - List invoices
+  - POST /api/locations/:locationId/invoices - Create invoice (Zod validated)
+  - PATCH /api/invoices/:id - Update status (paid/unpaid only, blocked for voided invoices)
+  - PATCH /api/invoices/:id/void - Void an invoice (irreversible)
+- **Sidebar Link**: "Invoices" appears only when location has invoiceEnabled=true

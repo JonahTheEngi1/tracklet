@@ -13,6 +13,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Users as UsersIcon, Plus, Search, ToggleLeft, ToggleRight, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -37,6 +44,26 @@ export default function AdminUsers() {
       toast({
         title: "User updated",
         description: "User status has been updated.",
+      });
+    },
+  });
+
+  const updateRoleMutation = useMutation({
+    mutationFn: async ({ id, role }: { id: string; role: string }) => {
+      return apiRequest("PATCH", `/api/admin/users/${id}`, { role });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({
+        title: "Role updated",
+        description: "User role has been changed.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to update user role.",
+        variant: "destructive",
       });
     },
   });
@@ -68,17 +95,6 @@ export default function AdminUsers() {
       user.firstName?.toLowerCase().includes(search.toLowerCase()) ||
       user.lastName?.toLowerCase().includes(search.toLowerCase())
   );
-
-  const getRoleBadgeVariant = (role: string) => {
-    switch (role) {
-      case "admin":
-        return "default";
-      case "manager":
-        return "secondary";
-      default:
-        return "outline";
-    }
-  };
 
   return (
     <div className="p-6 space-y-6">
@@ -138,6 +154,7 @@ export default function AdminUsers() {
                   <TableRow>
                     <TableHead>User</TableHead>
                     <TableHead>Email</TableHead>
+                    <TableHead>Location</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -155,9 +172,27 @@ export default function AdminUsers() {
                       </TableCell>
                       <TableCell>{user.email || "-"}</TableCell>
                       <TableCell>
-                        <Badge variant={getRoleBadgeVariant(user.role)} className="capitalize">
-                          {user.role}
-                        </Badge>
+                        {user.role === "admin" ? (
+                          <Badge variant="default">ADMIN</Badge>
+                        ) : (
+                          <span className="text-sm">{user.locationName || "-"}</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={user.role}
+                          onValueChange={(value) => updateRoleMutation.mutate({ id: user.id, role: value })}
+                          disabled={updateRoleMutation.isPending}
+                        >
+                          <SelectTrigger className="w-28" data-testid={`select-role-${user.id}`}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="manager">Manager</SelectItem>
+                            <SelectItem value="employee">Employee</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <Badge variant={user.isActive ? "outline" : "secondary"}>

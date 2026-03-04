@@ -118,7 +118,7 @@ export interface IStorage {
   getInvoice(id: string): Promise<InvoiceWithItems | undefined>;
   createInvoice(invoice: InsertInvoice, items: Omit<InsertInvoiceItem, "invoiceId">[]): Promise<InvoiceWithItems>;
   updateInvoice(id: string, invoice: Partial<Invoice>): Promise<Invoice | undefined>;
-  deleteInvoice(id: string): Promise<boolean>;
+  voidInvoice(id: string): Promise<Invoice | undefined>;
   getNextInvoiceNumber(locationId: string): Promise<string>;
 }
 
@@ -428,12 +428,18 @@ export class DatabaseStorage implements IStorage {
     const result: AppUserWithDetails[] = [];
     for (const appUser of appUsersList) {
       const [authUser] = await db.select().from(users).where(eq(users.id, appUser.authUserId));
+      let locationName: string | undefined;
+      if (appUser.locationId) {
+        const [loc] = await db.select().from(locations).where(eq(locations.id, appUser.locationId));
+        locationName = loc?.name;
+      }
       result.push({
         ...appUser,
         email: authUser?.email || undefined,
         firstName: authUser?.firstName || undefined,
         lastName: authUser?.lastName || undefined,
         profileImageUrl: authUser?.profileImageUrl || undefined,
+        locationName,
       });
     }
     
@@ -898,10 +904,13 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async deleteInvoice(id: string): Promise<boolean> {
-    await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, id));
-    const result = await db.delete(invoices).where(eq(invoices.id, id)).returning();
-    return result.length > 0;
+  async voidInvoice(id: string): Promise<Invoice | undefined> {
+    const [updated] = await db
+      .update(invoices)
+      .set({ status: "voided" })
+      .where(eq(invoices.id, id))
+      .returning();
+    return updated;
   }
 
   async getNextInvoiceNumber(locationId: string): Promise<string> {
