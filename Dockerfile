@@ -28,6 +28,10 @@ RUN npm ci --omit=dev
 # Copy built assets from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy startup script
+COPY script/docker-start.sh ./docker-start.sh
+RUN chmod +x docker-start.sh
+
 # Expose port
 EXPOSE 5000
 
@@ -35,5 +39,5 @@ EXPOSE 5000
 ENV NODE_ENV=production
 ENV PORT=5000
 
-# Start the application
-CMD ["node", "dist/index.cjs"]
+# Run migrations then start the application
+CMD ["./docker-start.sh"]

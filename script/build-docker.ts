@@ -63,6 +63,18 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  console.log("building migration script...");
+  await esbuild({
+    entryPoints: ["script/migrate.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/migrate.cjs",
+    minify: true,
+    external: ["pg"],
+    logLevel: "info",
+  });
 }
 
 buildAll().catch((err) => {

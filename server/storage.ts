@@ -207,7 +207,31 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteLocation(id: string): Promise<boolean> {
-    const result = await db.delete(locations).where(eq(locations.id, id));
+    // Delete all child records before deleting the location
+    // Invoice items (must delete before invoices)
+    const locationInvoices = await db.select({ id: invoices.id }).from(invoices).where(eq(invoices.locationId, id));
+    for (const inv of locationInvoices) {
+      await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, inv.id));
+    }
+    await db.delete(invoices).where(eq(invoices.locationId, id));
+
+    // Ticket messages (must delete before tickets)
+    const locationTickets = await db.select({ id: tickets.id }).from(tickets).where(eq(tickets.locationId, id));
+    for (const ticket of locationTickets) {
+      await db.delete(ticketMessages).where(eq(ticketMessages.ticketId, ticket.id));
+    }
+    await db.delete(tickets).where(eq(tickets.locationId, id));
+
+    // Other child tables
+    await db.delete(packages).where(eq(packages.locationId, id));
+    await db.delete(archivedPackages).where(eq(archivedPackages.locationId, id));
+    await db.delete(storageLocations).where(eq(storageLocations.locationId, id));
+    await db.delete(pricingTiers).where(eq(pricingTiers.locationId, id));
+    await db.delete(appUsers).where(eq(appUsers.locationId, id));
+    await db.delete(locationBackups).where(eq(locationBackups.locationId, id));
+
+    // Finally delete the location itself
+    await db.delete(locations).where(eq(locations.id, id));
     return true;
   }
 
